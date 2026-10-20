@@ -1,23 +1,33 @@
 from flask import Flask, jsonify
-from nba_api.live.nba.endpoints import scoreboard, boxscore
+import requests
 from datetime import datetime
 
 app = Flask(__name__)
 
+# Modern browser headers to prevent NBA.com WAF / Cloudflare blocks (HTTP 403)
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+    "Accept": "application/json, text/plain, */*"
+}
+
 @app.route("/live-scores", methods=["GET"])
 def get_live_scores():
     try:
-        board = scoreboard.ScoreBoard()
-        data = board.get_dict()
+        url = "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json"
+        response = requests.get(url, headers=HEADERS, timeout=5)
         
-        if not data or "scoreboard" not in data:
+        if response.status_code != 200:
             return jsonify({
                 "timestamp": datetime.now().isoformat(),
                 "games": [],
-                "message": "No live scoreboard data available right now."
+                "error": f"NBA CDN returned status code {response.status_code}"
             }), 200
 
-        games_data = data.get("scoreboard", {}).get("games", [])
+        data = response.json()
+        scoreboard_data = data.get("scoreboard", {})
+        games_data = scoreboard_data.get("games", [])
         
         formatted_games = []
         for game in games_data:
@@ -53,21 +63,20 @@ def get_live_scores():
 @app.route("/game/<game_id>/boxscore", methods=["GET"])
 def get_game_boxscore(game_id):
     try:
-        # Query the live box score endpoint for the specific game ID
-        game_box = boxscore.BoxScore(game_id=game_id)
-        data = game_box.get_dict()
+        url = f"https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{game_id}.json"
+        response = requests.get(url, headers=HEADERS, timeout=5)
         
-        if not data or "game" not in data:
-            return jsonify({"error": "Box score not found for this game ID"}), 404
+        if response.status_code != 200:
+            return jsonify({"error": f"Box score not found (status {response.status_code})"}), 404
             
+        data = response.json()
         game_data = data.get("game", {})
         
-        # Structure the payload with team breakdowns, player stats, and period info
         boxscore_payload = {
             "game_id": game_data.get("gameId"),
             "status": game_data.get("gameStatusText"),
-            "home_team": game_data.get("homeTeam"), # Includes players, stats, and periods
-            "away_team": game_data.get("awayTeam")  # Includes players, stats, and periods
+            "home_team": game_data.get("homeTeam"),
+            "away_team": game_data.get("awayTeam")
         }
         
         return jsonify(boxscore_payload), 200
@@ -77,4 +86,4 @@ def get_game_boxscore(game_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False)
