@@ -81,7 +81,17 @@ def get_game_boxscore(game_id):
         # Extract boxscore and header sections safely
         boxscore_data = data.get("boxscore", {})
         header_competitions = data.get("header", {}).get("competitions", [{}])[0]
-        competitors = header_competitions.get("competitors", [])
+        competitors = header_competitions.get("competitions", [])
+        
+        # Extract game status, quarter, and clock details
+        status_info = header_competitions.get("status", {})
+        game_status = {
+            "detail": status_info.get("type", {}).get("detail"),       # e.g., "3rd Qtr - 4:12" or "Final"
+            "state": status_info.get("type", {}).get("name"),         # e.g., "STATUS_IN_PROGRESS" or "STATUS_FINAL"
+            "period": status_info.get("period"),                       # e.g., 3
+            "clock": status_info.get("displayClock"),                 # e.g., "4:12"
+            "completed": status_info.get("type", {}).get("completed", False)
+        }
         
         # Build quarter/line scores mapping
         quarter_totals = {}
@@ -91,8 +101,6 @@ def get_game_boxscore(game_id):
             quarter_totals[tricode] = [ls.get("displayValue") for ls in linescores]
 
         teams_payload = {}
-        
-        # ESPN groups stats by team in boxscore['teams'] and boxscore['players']
         espn_teams = boxscore_data.get("teams", [])
         espn_players_groups = boxscore_data.get("players", [])
         
@@ -101,7 +109,6 @@ def get_game_boxscore(game_id):
             tricode = team_info.get("abbreviation")
             home_away = t_obj.get("homeAway") # "home" or "away"
             
-            # Extract player stats if available for this team group
             active_players = []
             inactive_players = []
             labels = []
@@ -111,7 +118,6 @@ def get_game_boxscore(game_id):
                 statistics_categories = player_group.get("statistics", [])
                 
                 if statistics_categories:
-                    # Grab stat labels (e.g., MIN, PTS, REB, AST) from the first category
                     labels = statistics_categories[0].get("labels", [])
                     
                     for stat_cat in statistics_categories:
@@ -145,6 +151,7 @@ def get_game_boxscore(game_id):
 
         formatted_payload = {
             "game_id": game_id,
+            "status": game_status,
             "teams": teams_payload,
             "quarterTotals": quarter_totals
         }
@@ -153,7 +160,6 @@ def get_game_boxscore(game_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
