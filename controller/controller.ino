@@ -30,7 +30,7 @@
 #define OE_PIN   13
 #define CLK_PIN  12
 
-MatrixPanel_I2S_DMA *dma_display = nullptr;
+MatrixPanel_I2S_DMA *dma_display = nullptr;  // --- ADD THESE TIMING FIXES ---
 
 struct GameData {
   String gameId;
@@ -150,7 +150,7 @@ void drawListView() {
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
   dma_display->setCursor(2, 0);
   dma_display->print("NBA SCORES");
-  dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(1, 8, 64, dma_display->color565(60, 60, 60));
 
   // Games Rows (TomThumb Compact Font)
   dma_display->setFont(&TomThumb);
@@ -166,30 +166,30 @@ void drawListView() {
 
     // Highlight bar behind selected row
     if (isSelected) {
-      dma_display->fillRect(0, baselineY - 6, 64, 7, dma_display->color565(40, 40, 90));
+      dma_display->fillRect(1, baselineY - 6, 64, 7, dma_display->color565(40, 40, 90));
     }
 
     GameData g = gameList[i];
 
     // Your custom X positions: 1, 18, 30, 35, 49
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(1, baselineY);
+    dma_display->setCursor(3, baselineY);
     dma_display->print(g.awayTricode);
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(18, baselineY);
+    dma_display->setCursor(20, baselineY);
     dma_display->print(g.awayScore);
 
     dma_display->setTextColor(dma_display->color565(120, 120, 120));
-    dma_display->setCursor(30, baselineY);
+    dma_display->setCursor(32, baselineY);
     dma_display->print("-");
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(35, baselineY);
+    dma_display->setCursor(37, baselineY);
     dma_display->print(g.homeScore);
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(49, baselineY);
+    dma_display->setCursor(51, baselineY);
     dma_display->print(g.homeTricode);
   }
 }
@@ -204,7 +204,7 @@ void drawBoxScoreView() {
   dma_display->setTextColor(dma_display->color565(0, 255, 255)); // Cyan for detail view
   dma_display->setCursor(2, 0);
   dma_display->print("BOX SCORE");
-  dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(1, 8, 64, dma_display->color565(60, 60, 60));
 
   // Details (TomThumb Font)
   dma_display->setFont(&TomThumb);
@@ -233,6 +233,11 @@ void setup() {
   mxconfig.gpio.d  = D_PIN;  mxconfig.gpio.e  = E_PIN;
   mxconfig.gpio.lat = LAT_PIN; mxconfig.gpio.oe = OE_PIN; mxconfig.gpio.clk = CLK_PIN;
   mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
+
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M; // Lower the bus speed slightly to clean up signal noise
+  mxconfig.latch_blanking = 4;               // Increase latch blanking (try 2, 3, or 4)
+  mxconfig.clkphase = true;                  // Toggle clock phase (try true or false)
+  mxconfig.double_buff = true;
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   if (!dma_display->begin()) {
@@ -274,6 +279,8 @@ void loop() {
   } else {
     drawListView();
   }
+
+  dma_display->flipDMABuffer();
 
   delay(100);
 }
