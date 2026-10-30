@@ -1,3 +1,13 @@
+# Ignore secret configuration files
+config.h
+*/config.h
+
+# Ignore Arduino build artifacts
+build/
+.vscode/
+*.bin
+*.elf
+
 venv/
 __pycache__/
 *.pyc
