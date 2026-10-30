@@ -7,25 +7,22 @@
 
 #include "config.h"
 
-// --- MATRIX DIMENSIONS ---
+// --- MATRIX DIMENSIONS & GPIO (Seengreat S3) ---
 #define PANEL_WIDTH      64
 #define PANEL_HEIGHT     64
 #define PANEL_CHAIN      1
 
-// --- GPIO PIN DEFINITIONS (Seengreat S3 Controller) ---
 #define R1_PIN   5
 #define G1_PIN   4
 #define B1_PIN   6
 #define R2_PIN   15
 #define G2_PIN   7
 #define B2_PIN   17
-
 #define A_PIN    8
 #define B_PIN    18
 #define C_PIN    10
 #define D_PIN    9
 #define E_PIN    16
-
 #define LAT_PIN  11
 #define OE_PIN   13
 #define CLK_PIN  12
@@ -45,41 +42,25 @@ const int MAX_GAMES = 20;
 GameData gameList[MAX_GAMES];
 int totalGames = 0;
 
-// --- MENU & NAVIGATION STATE ---
-enum AppState {
-  STATE_LIST,
-  STATE_BOXSCORE
-};
-AppState currentAppState = STATE_LIST;
-
-int selectedGameIndex = 0; // The currently highlighted row (0 to totalGames-1)
+// Received from Pi dashboard state
+String currentView = "list";
+int selectedIndex = 0;
 const int GAMES_PER_PAGE = 7;
-int currentPage = 0;
 
-// Timing controls
 unsigned long lastFetchTime = 0;
-const unsigned long FETCH_INTERVAL = 30000; 
-
+const unsigned long FETCH_INTERVAL = 3000; // Poll every 3 seconds for snappy dashboard response
 String statusMessage = "Connecting...";
 
 void setupWifi() {
-  Serial.print("Connecting to Wi-Fi: ");
-  Serial.println(WIFI_SSID);
-
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
 }
 
-void fetchLiveScores() {
-  if (WiFi.status() != WL_CONNECTED) {
-    statusMessage = "WiFi Offline";
-    totalGames = 0;
-    return;
-  }
+void fetchState() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
   http.begin(PI_SERVER_URL);
@@ -87,113 +68,95 @@ void fetchLiveScores() {
 
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
-    
     DynamicJsonDocument doc(8192);
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
+      currentView = doc["view"].as<String>();
+      selectedIndex = doc["selected_index"].as<int>();
+
       JsonArray games = doc["games"];
       totalGames = 0;
 
       for (JsonObject game : games) {
         if (totalGames >= MAX_GAMES) break;
-
         gameList[totalGames].gameId      = game["game_id"].as<String>();
         gameList[totalGames].awayTricode = game["away_team"]["tricode"].as<String>();
         gameList[totalGames].awayScore   = game["away_team"]["score"].as<String>();
         gameList[totalGames].homeTricode = game["home_team"]["tricode"].as<String>();
         gameList[totalGames].homeScore   = game["home_team"]["score"].as<String>();
         gameList[totalGames].status      = game["status"].as<String>();
-
         totalGames++;
       }
-
-      if (totalGames == 0) {
-        statusMessage = "No Games Today";
-      } else {
-        statusMessage = "";
-      }
+      statusMessage = "";
     } else {
       statusMessage = "JSON Parse Err";
-      totalGames = 0;
     }
   } else {
-    statusMessage = "HTTP Err: " + String(httpCode);
-    totalGames = 0;
+    statusMessage = "HTTP Err";
   }
   http.end();
 }
 
 void drawListView() {
-  // Top Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
   dma_display->setCursor(2, 0);
-  
-  int totalPages = (totalGames + GAMES_PER_PAGE - 1) / GAMES_PER_PAGE;
-  if (totalPages > 1) {
-    dma_display->printf("NBA (%d/%d)", currentPage + 1, totalPages);
-  } else {
-    dma_display->print("NBA SCORES");
-  }
+  dma_display->print("NBA SCORES");
   dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
 
-  // Games Rows (TomThumb Font)
   dma_display->setFont(&TomThumb);
 
+  // Automatically calculate page based on web-selected index
+  int currentPage = selectedIndex / GAMES_PER_PAGE;
   int startIndex = currentPage * GAMES_PER_PAGE;
   int endIndex = min(startIndex + GAMES_PER_PAGE, totalGames);
 
   for (int i = startIndex; i < endIndex; i++) {
     int rowOffset = i - startIndex;
     int baselineY = 16 + (rowOffset * 8);
+    bool isSelected = (i == selectedIndex);
 
-    bool isSelected = (i == selectedGameIndex);
-
-    // Draw a subtle highlight bar behind the selected row
     if (isSelected) {
       dma_display->fillRect(0, baselineY - 6, 64, 7, dma_display->color565(40, 40, 90));
     }
 
     GameData g = gameList[i];
 
-    // User's custom X positions: 1, 18, 30, 35, 49
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(3, baselineY);
+    dma_display->setCursor(1, baselineY);
     dma_display->print(g.awayTricode);
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(20, baselineY);
+    dma_display->setCursor(18, baselineY);
     dma_display->print(g.awayScore);
 
     dma_display->setTextColor(dma_display->color565(120, 120, 120));
-    dma_display->setCursor(32, baselineY);
+    dma_display->setCursor(30, baselineY);
     dma_display->print("-");
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(37, baselineY);
+    dma_display->setCursor(35, baselineY);
     dma_display->print(g.homeScore);
 
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(51, baselineY);
+    dma_display->setCursor(49, baselineY);
     dma_display->print(g.homeTricode);
   }
 }
 
 void drawBoxScoreView() {
-  if (totalGames == 0) return;
-  GameData g = gameList[selectedGameIndex];
+  if (totalGames == 0 || selectedIndex >= totalGames) return;
+  GameData g = gameList[selectedIndex];
 
-  // Header
   dma_display->setFont();
   dma_display->setTextSize(1);
-  dma_display->setTextColor(dma_display->color565(0, 255, 255)); // Cyan for detail view
+  dma_display->setTextColor(dma_display->color565(0, 255, 255));
   dma_display->setCursor(2, 0);
   dma_display->print("BOX SCORE");
   dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
 
-  // Detail content placeholder (Ready for your Flask boxscore API payload)
   dma_display->setFont(&TomThumb);
   
   dma_display->setTextColor(dma_display->color565(255, 255, 255));
@@ -207,29 +170,6 @@ void drawBoxScoreView() {
   dma_display->setTextColor(dma_display->color565(150, 150, 150));
   dma_display->setCursor(2, 40);
   dma_display->print("Status: " + g.status);
-
-  dma_display->setCursor(2, 56);
-  dma_display->print("Press to return");
-}
-
-void drawDisplay() {
-  if (!dma_display) return;
-  dma_display->clearScreen();
-
-  if (totalGames == 0) {
-    dma_display->setFont();
-    dma_display->setTextSize(1);
-    dma_display->setTextColor(dma_display->color565(255, 200, 0));
-    dma_display->setCursor(2, 28);
-    dma_display->print(statusMessage);
-    return;
-  }
-
-  if (currentAppState == STATE_LIST) {
-    drawListView();
-  } else if (currentAppState == STATE_BOXSCORE) {
-    drawBoxScoreView();
-  }
 }
 
 void setup() {
@@ -245,19 +185,9 @@ void setup() {
   mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-  if (!dma_display->begin()) {
-    Serial.println("Matrix initialization failed!");
-    while (true) delay(1000);
-  }
-
+  dma_display->begin();
   dma_display->setBrightness8(128);
   dma_display->clearScreen();
-
-  dma_display->setFont();
-  dma_display->setTextColor(dma_display->color565(255, 255, 0));
-  dma_display->setTextSize(1);
-  dma_display->setCursor(2, 28);
-  dma_display->print("Connecting...");
 
   setupWifi();
 }
@@ -265,16 +195,23 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // 1. Fetch live scores from Pi periodically
   if (currentMillis - lastFetchTime >= FETCH_INTERVAL || lastFetchTime == 0) {
     lastFetchTime = currentMillis;
-    fetchLiveScores();
+    fetchState();
   }
 
-  // NOTE FOR FUTURE CONTROLS:
-  // When you add buttons or a rotary encoder, you will change `selectedGameIndex` 
-  // and toggle `currentAppState` between STATE_LIST and STATE_BOXSCORE here.
+  dma_display->clearScreen();
+  if (totalGames == 0) {
+    dma_display->setFont();
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(dma_display->color565(255, 200, 0));
+    dma_display->setCursor(2, 28);
+    dma_display->print(statusMessage);
+  } else if (currentView == "boxscore") {
+    drawBoxScoreView();
+  } else {
+    drawListView();
+  }
 
-  drawDisplay();
   delay(100);
 }

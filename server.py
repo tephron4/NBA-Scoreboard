@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, render_template_string
 import requests
 from datetime import datetime
 
@@ -7,6 +7,100 @@ app = Flask(__name__)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
+
+# Global control state managed by the web dashboard
+scoreboard_state = {
+    "view": "list",           # "list" or "boxscore"
+    "selected_index": 0       # Currently highlighted game row
+}
+
+# --- HTML / CSS CONTROL DASHBOARD TEMPLATE ---
+CONTROL_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NBA Scoreboard Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; text-align: center; margin: 0; padding: 20px; }
+        h1 { color: #ffa500; font-size: 1.5rem; }
+        .card { background: #1e1e1e; border-radius: 12px; padding: 15px; max-width: 400px; margin: 0 auto 20px auto; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+        button { background: #333; color: white; border: none; padding: 15px; font-size: 1rem; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        button:active { background: #555; }
+        button.primary { background: #007acc; grid-column: span 2; }
+        button.accent { background: #d97706; grid-column: span 2; }
+        .status { font-size: 0.9rem; color: #aaa; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h1>NBA Scoreboard Control</h1>
+    
+    <div class="card">
+        <div class="status">Current View: <span id="lbl-view" style="color:#00ffff;">Loading...</span></div>
+        <div class="status">Selected Index: <span id="lbl-index" style="color:#ffa500;">0</span></div>
+        
+        <div class="btn-grid">
+            <button onclick="sendAction('up')">▲ Up</button>
+            <button onclick="sendAction('down')">▼ Down</button>
+            <button class="primary" onclick="sendAction('toggle_view')">Toggle Box Score / List</button>
+            <button class="accent" onclick="sendAction('refresh')">Force Refresh Data</button>
+        </div>
+    </div>
+
+    <script>
+        function sendAction(action) {
+            fetch('/api/control', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: action })
+            })
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('lbl-view').innerText = data.view.toUpperCase();
+                document.getElementById('lbl-index').innerText = data.selected_index;
+            });
+        }
+
+        // Poll state to keep UI in sync
+        setInterval(() => {
+            fetch('/api/state')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('lbl-view').innerText = data.view.toUpperCase();
+                document.getElementById('lbl-index').innerText = data.selected_index;
+            });
+        }, 2000);
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/')
+@app.route('/control')
+def control_panel():
+    return render_template_string(CONTROL_PAGE)
+
+@app.route('/api/state', methods=['GET'])
+def get_state():
+    return jsonify(scoreboard_state)
+
+@app.route('/api/control', methods=['POST'])
+def control_action():
+    data = request.json
+    action = data.get('action')
+    
+    if action == 'up':
+        scoreboard_state['selected_index'] = max(0, scoreboard_state['selected_index'] - 1)
+    elif action == 'down':
+        scoreboard_state['selected_index'] += 1  # Will clamp against total games in live-scores route if needed
+    elif action == 'toggle_view':
+        if scoreboard_state['view'] == 'list':
+            scoreboard_state['view'] = 'boxscore'
+        else:
+            scoreboard_state['view'] = 'list'
+            
+    return jsonify(scoreboard_state)
 
 @app.route("/live-scores", methods=["GET"])
 def get_live_scores():
