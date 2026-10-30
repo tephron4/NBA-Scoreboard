@@ -122,9 +122,15 @@ def get_live_scores():
         formatted_games = []
         for event in events:
             formatted_games.append(format_game(event))
+
+        # Clamp selected index within valid game bounds
+        if len(formatted_games) > 0:
+            scoreboard_state['selected_index'] = min(scoreboard_state['selected_index'], len(formatted_games) - 1)
             
         return jsonify({
             "timestamp": datetime.now().isoformat(),
+            "view": scoreboard_state['view'],
+            "selected_index": scoreboard_state['selected_index'],
             "games": formatted_games
         }), 200
 

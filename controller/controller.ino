@@ -7,22 +7,25 @@
 
 #include "config.h"
 
-// --- MATRIX DIMENSIONS & GPIO (Seengreat S3) ---
+// --- MATRIX DIMENSIONS ---
 #define PANEL_WIDTH      64
 #define PANEL_HEIGHT     64
 #define PANEL_CHAIN      1
 
+// --- GPIO PIN DEFINITIONS (Seengreat S3 Controller) ---
 #define R1_PIN   5
 #define G1_PIN   4
 #define B1_PIN   6
 #define R2_PIN   15
 #define G2_PIN   7
 #define B2_PIN   17
+
 #define A_PIN    8
 #define B_PIN    18
 #define C_PIN    10
 #define D_PIN    9
 #define E_PIN    16
+
 #define LAT_PIN  11
 #define OE_PIN   13
 #define CLK_PIN  12
@@ -47,20 +50,54 @@ String currentView = "list";
 int selectedIndex = 0;
 const int GAMES_PER_PAGE = 7;
 
+// Box score cache details
+String boxScoreDetail = "";
+String lastFetchedBoxScoreId = "";
+
 unsigned long lastFetchTime = 0;
-const unsigned long FETCH_INTERVAL = 3000; // Poll every 3 seconds for snappy dashboard response
+const unsigned long FETCH_INTERVAL = 3000; // Poll every 3s for snappy web dashboard sync
 String statusMessage = "Connecting...";
 
 void setupWifi() {
+  Serial.print("Connecting to Wi-Fi: ");
+  Serial.println(WIFI_SSID);
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
+  Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
+}
+
+void fetchBoxScoreDetails(String gameId) {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  // Uses PI_BASE_URL defined in config.h
+  String url = String(PI_BASE_URL) + "/game/" + gameId + "/boxscore";
+
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(16384);
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (!error) {
+      boxScoreDetail = doc["status"]["detail"].as<String>();
+      lastFetchedBoxScoreId = gameId;
+    }
+  }
+  http.end();
 }
 
 void fetchState() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    statusMessage = "WiFi Offline";
+    return;
+  }
 
   HTTPClient http;
   http.begin(PI_SERVER_URL);
@@ -93,12 +130,21 @@ void fetchState() {
       statusMessage = "JSON Parse Err";
     }
   } else {
-    statusMessage = "HTTP Err";
+    statusMessage = "HTTP Err: " + String(httpCode);
   }
   http.end();
+
+  // If in box score view, fetch deep stats if game ID changes
+  if (currentView == "boxscore" && totalGames > 0 && selectedIndex < totalGames) {
+    String activeGameId = gameList[selectedIndex].gameId;
+    if (activeGameId != lastFetchedBoxScoreId) {
+      fetchBoxScoreDetails(activeGameId);
+    }
+  }
 }
 
 void drawListView() {
+  // Top Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
@@ -106,9 +152,9 @@ void drawListView() {
   dma_display->print("NBA SCORES");
   dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
 
+  // Games Rows (TomThumb Compact Font)
   dma_display->setFont(&TomThumb);
 
-  // Automatically calculate page based on web-selected index
   int currentPage = selectedIndex / GAMES_PER_PAGE;
   int startIndex = currentPage * GAMES_PER_PAGE;
   int endIndex = min(startIndex + GAMES_PER_PAGE, totalGames);
@@ -118,12 +164,14 @@ void drawListView() {
     int baselineY = 16 + (rowOffset * 8);
     bool isSelected = (i == selectedIndex);
 
+    // Highlight bar behind selected row
     if (isSelected) {
       dma_display->fillRect(0, baselineY - 6, 64, 7, dma_display->color565(40, 40, 90));
     }
 
     GameData g = gameList[i];
 
+    // Your custom X positions: 1, 18, 30, 35, 49
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
     dma_display->setCursor(1, baselineY);
     dma_display->print(g.awayTricode);
@@ -150,13 +198,15 @@ void drawBoxScoreView() {
   if (totalGames == 0 || selectedIndex >= totalGames) return;
   GameData g = gameList[selectedIndex];
 
+  // Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
-  dma_display->setTextColor(dma_display->color565(0, 255, 255));
+  dma_display->setTextColor(dma_display->color565(0, 255, 255)); // Cyan for detail view
   dma_display->setCursor(2, 0);
   dma_display->print("BOX SCORE");
   dma_display->drawFastHLine(0, 8, 64, dma_display->color565(60, 60, 60));
 
+  // Details (TomThumb Font)
   dma_display->setFont(&TomThumb);
   
   dma_display->setTextColor(dma_display->color565(255, 255, 255));
@@ -169,7 +219,7 @@ void drawBoxScoreView() {
 
   dma_display->setTextColor(dma_display->color565(150, 150, 150));
   dma_display->setCursor(2, 40);
-  dma_display->print("Status: " + g.status);
+  dma_display->print("Status: " + (boxScoreDetail.length() > 0 ? boxScoreDetail : g.status));
 }
 
 void setup() {
@@ -185,9 +235,19 @@ void setup() {
   mxconfig.driver = HUB75_I2S_CFG::SHIFTREG;
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-  dma_display->begin();
+  if (!dma_display->begin()) {
+    Serial.println("Matrix initialization failed!");
+    while (true) delay(1000);
+  }
+
   dma_display->setBrightness8(128);
   dma_display->clearScreen();
+
+  dma_display->setFont();
+  dma_display->setTextColor(dma_display->color565(255, 255, 0));
+  dma_display->setTextSize(1);
+  dma_display->setCursor(2, 28);
+  dma_display->print("Connecting...");
 
   setupWifi();
 }
@@ -195,12 +255,14 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
+  // Poll Pi server for state and game data periodically
   if (currentMillis - lastFetchTime >= FETCH_INTERVAL || lastFetchTime == 0) {
     lastFetchTime = currentMillis;
     fetchState();
   }
 
   dma_display->clearScreen();
+
   if (totalGames == 0) {
     dma_display->setFont();
     dma_display->setTextSize(1);
