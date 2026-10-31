@@ -149,7 +149,11 @@ def format_game(game):
     for comp in competitors:
         team_info = {
             "tricode": comp.get("team", {}).get("abbreviation"),
-            "score": comp.get("score", "0")
+            "score": comp.get("score", "0"),
+            "color": comp.get("team", {}).get("color"),
+            "alternateColor": comp.get("team", {}).get("alternateColor"),
+            "lineScores": comp.get("linescores", []),
+            "record": comp.get("records", [])[0]
         }
         if comp.get("homeAway") == "home":
             home_team = team_info

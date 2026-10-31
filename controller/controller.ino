@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <Fonts/TomThumb.h>
+#include <string>
 
 #include "config.h"
 
@@ -48,7 +49,7 @@ int totalGames = 0;
 // Received from Pi dashboard state
 String currentView = "list";
 int selectedIndex = 0;
-const int GAMES_PER_PAGE = 7;
+const int GAMES_PER_PAGE = 5;
 
 // Box score cache details
 String boxScoreDetail = "";
@@ -86,7 +87,8 @@ void fetchBoxScoreDetails(String gameId) {
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
-      boxScoreDetail = doc["status"]["detail"].as<String>();
+      std::string rawStatus = doc["status"]["detail"];
+      boxScoreDetail = cleanGameStatus(rawStatus);
       lastFetchedBoxScoreId = gameId;
     }
   }
@@ -122,7 +124,8 @@ void fetchState() {
         gameList[totalGames].awayScore   = game["away_team"]["score"].as<String>();
         gameList[totalGames].homeTricode = game["home_team"]["tricode"].as<String>();
         gameList[totalGames].homeScore   = game["home_team"]["score"].as<String>();
-        gameList[totalGames].status      = game["status"].as<String>();
+        std::string rawStatus = game["status"];
+        gameList[totalGames].status      = cleanGameStatus(rawStatus);
         totalGames++;
       }
       statusMessage = "";
@@ -148,12 +151,9 @@ void drawListView() {
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
-  dma_display->setCursor(2, 0);
+  dma_display->setCursor(35, 0);
   dma_display->print("NBA SCORES");
-  dma_display->drawFastHLine(1, 8, 127, dma_display->color565(60, 60, 60));
-
-  // Games Rows (TomThumb Compact Font)
-  dma_display->setFont(&TomThumb);
+  dma_display->drawFastHLine(33, 8, 63, dma_display->color565(60, 60, 60));
 
   int currentPage = selectedIndex / GAMES_PER_PAGE;
   int startIndex = currentPage * GAMES_PER_PAGE;
@@ -161,36 +161,54 @@ void drawListView() {
 
   for (int i = startIndex; i < endIndex; i++) {
     int rowOffset = i - startIndex;
-    int baselineY = 16 + (rowOffset * 8);
+    int baselineY = 18 + (rowOffset * 10);
     bool isSelected = (i == selectedIndex);
 
     // Highlight bar behind selected row
     if (isSelected) {
-      dma_display->fillRect(1, baselineY - 6, 127, 7, dma_display->color565(40, 40, 90));
+      dma_display->drawFastHLine(1, baselineY - 9, 127, dma_display->color565(40, 40, 90));
+      dma_display->drawFastHLine(1, baselineY + 1, 127, dma_display->color565(40, 40, 90));
     }
 
     GameData g = gameList[i];
 
-    // Your custom X positions: 1, 18, 30, 35, 49
+    // 1. Away Tricode (Regular Font - top-left aligned)
+    dma_display->setFont();
+    dma_display->setTextSize(1);
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(3, baselineY);
+    dma_display->setCursor(2, baselineY - 7);
     dma_display->print(g.awayTricode);
 
+    // Switch to TomThumb Font for scores and status (baseline aligned)
+    dma_display->setFont(&TomThumb);
+
+    // 2. Away Score (TomThumb)
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(20, baselineY);
+    dma_display->setCursor(20, baselineY - 1);
     dma_display->print(g.awayScore);
 
+    // 3. Hyphen (TomThumb)
     dma_display->setTextColor(dma_display->color565(120, 120, 120));
-    dma_display->setCursor(32, baselineY);
+    dma_display->setCursor(30, baselineY - 1);
     dma_display->print("-");
 
+    // 4. Home Score (TomThumb)
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(37, baselineY);
+    dma_display->setCursor(35, baselineY - 1);
     dma_display->print(g.homeScore);
 
+    // 5. Home Tricode (Regular Font - top-left aligned)
+    dma_display->setFont();
+    dma_display->setTextSize(1);
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(51, baselineY);
+    dma_display->setCursor(46, baselineY - 7);
     dma_display->print(g.homeTricode);
+
+    // 6. Status (TomThumb)
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextColor(isSelected ? dma_display->color565(0, 0, 255) : dma_display->color565(0, 0, 200));
+    dma_display->setCursor(68, baselineY - 1);
+    dma_display->print(g.status);
   }
 }
 
@@ -220,6 +238,25 @@ void drawBoxScoreView() {
   dma_display->setTextColor(dma_display->color565(150, 150, 150));
   dma_display->setCursor(2, 40);
   dma_display->print("Status: " + (boxScoreDetail.length() > 0 ? boxScoreDetail : g.status));
+}
+
+// Helper function to trim trailing "Quarter"
+String cleanGameStatus(std::string status) {
+    // Find the last occurrence of "Quarter"
+    size_t pos = status.rfind("Quarter");
+    
+    // If found, ensure it's near the end of the string to avoid cutting off mid-word
+    if (pos != std::string::npos) {
+        // Erase "Quarter" and any trailing/leading spaces left behind
+        status.erase(pos);
+        
+        // Optional: Trim any trailing whitespace left after removal
+        while (!status.empty() && isspace(status.back())) {
+            status.pop_back();
+        }
+    }
+    
+    return status.c_str();
 }
 
 void setup() {
