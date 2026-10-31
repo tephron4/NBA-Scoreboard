@@ -7,6 +7,7 @@
 #include <string>
 
 #include "config.h"
+#include "logos.h"
 
 // --- MATRIX DIMENSIONS ---
 #define PANEL_WIDTH      64
@@ -36,9 +37,17 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;  // --- ADD THESE TIMING FIXES ---
 struct GameData {
   String gameId;
   String awayTricode;
+  String awayColor;
+  String awayAltColor;
   String awayScore;
+  String awayLineScores;
+  String awayRecord;
   String homeTricode;
+  String homeColor;
+  String homeAltColor;
   String homeScore;
+  String homeLineScores;
+  String homeRecord;
   String status;
 };
 
@@ -119,13 +128,19 @@ void fetchState() {
 
       for (JsonObject game : games) {
         if (totalGames >= MAX_GAMES) break;
-        gameList[totalGames].gameId      = game["game_id"].as<String>();
-        gameList[totalGames].awayTricode = game["away_team"]["tricode"].as<String>();
-        gameList[totalGames].awayScore   = game["away_team"]["score"].as<String>();
-        gameList[totalGames].homeTricode = game["home_team"]["tricode"].as<String>();
-        gameList[totalGames].homeScore   = game["home_team"]["score"].as<String>();
+        gameList[totalGames].gameId         = game["game_id"].as<String>();
+        gameList[totalGames].awayTricode    = game["away_team"]["tricode"].as<String>();
+        gameList[totalGames].awayColor      = game["away_team"]["color"].as<String>();
+        gameList[totalGames].awayAltColor   = game["away_team"]["alternateColor"].as<String>();
+        gameList[totalGames].awayScore      = game["away_team"]["score"].as<String>();
+        gameList[totalGames].awayLineScores = game["away_team"]["lineScores"].as<String>();
+        gameList[totalGames].homeTricode    = game["home_team"]["tricode"].as<String>();
+        gameList[totalGames].homeColor      = game["home_team"]["color"].as<String>();
+        gameList[totalGames].homeAltColor   = game["home_team"]["alternateColor"].as<String>();
+        gameList[totalGames].homeScore      = game["home_team"]["score"].as<String>();
+        gameList[totalGames].homeLineScores = game["home_team"]["lineScores"].as<String>();
         std::string rawStatus = game["status"];
-        gameList[totalGames].status      = cleanGameStatus(rawStatus);
+        gameList[totalGames].status       = cleanGameStatus(rawStatus);
         totalGames++;
       }
       statusMessage = "";
@@ -216,27 +231,44 @@ void drawBoxScoreView() {
   if (totalGames == 0 || selectedIndex >= totalGames) return;
   GameData g = gameList[selectedIndex];
 
+  // Logos
+  // 1. Try to get the logo pointers
+  const uint16_t* awayLogo = getTeamLogo(g.awayTricode);
+  const uint16_t* homeLogo = getTeamLogo(g.homeTricode);
+
+  if (awayLogo != nullptr) {
+    // Draw the 8x8 bitmap if the logo exists in your header
+    dma_display->drawRGBBitmap(2, 1, awayLogo, 16, 16);
+  }
+
   // Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
-  dma_display->setTextColor(dma_display->color565(0, 255, 255)); // Cyan for detail view
-  dma_display->setCursor(2, 0);
-  dma_display->print("BOX SCORE");
-  dma_display->drawFastHLine(1, 8, 127, dma_display->color565(60, 60, 60));
+  dma_display->setTextColor(hexToRGB565(g.awayColor));
+  dma_display->setCursor(20, 0);
+  dma_display->print(g.awayTricode);
+  dma_display->setTextColor(dma_display->color565(255, 255, 255));
+  dma_display->setCursor(38, 0);
+  dma_display->print(" vs ");
+  dma_display->setTextColor(hexToRGB565(g.homeColor));
+  dma_display->setCursor(63, 0);
+  dma_display->print(g.homeTricode);
+  dma_display->drawFastHLine(19, 8, 62, dma_display->color565(60, 60, 60));
+
+  if (homeLogo != nullptr) {
+    // Draw the 8x8 bitmap if the logo exists in your header
+    dma_display->drawRGBBitmap(82, 1, homeLogo, 16, 16);
+  }
 
   // Details (TomThumb Font)
   dma_display->setFont(&TomThumb);
-  
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(2, 18);
-  dma_display->print(g.awayTricode + " vs " + g.homeTricode);
 
   dma_display->setTextColor(dma_display->color565(255, 255, 0));
-  dma_display->setCursor(2, 28);
+  dma_display->setCursor(2, 24);
   dma_display->print("Score: " + g.awayScore + " - " + g.homeScore);
 
-  dma_display->setTextColor(dma_display->color565(150, 150, 150));
-  dma_display->setCursor(2, 40);
+  dma_display->setTextColor(dma_display->color565(0, 150, 0));
+  dma_display->setCursor(2, 36);
   dma_display->print("Status: " + (boxScoreDetail.length() > 0 ? boxScoreDetail : g.status));
 }
 
@@ -257,6 +289,24 @@ String cleanGameStatus(std::string status) {
     }
     
     return status.c_str();
+}
+
+uint16_t hexToRGB565(String hexStr) {
+    // Strip the '#' character if the API includes it
+    if (hexStr.length() > 0 && hexStr.charAt(0) == '#') {
+        hexStr = hexStr.substring(1);
+    }
+    
+    // Convert hex string (e.g. "00539B") to a long integer
+    long number = strtol(hexStr.c_str(), NULL, 16);
+    
+    // Extract 8-bit R, G, B components
+    uint8_t r = (number >> 16) & 0xFF;
+    uint8_t g = (number >> 8) & 0xFF;
+    uint8_t b = number & 0xFF;
+    
+    // Convert to 16-bit RGB565 using the display library's built-in helper
+    return dma_display->color565(r, g, b);
 }
 
 void setup() {

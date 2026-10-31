@@ -8,6 +8,8 @@ build/
 *.bin
 *.elf
 
+# Others
+logos.txt
 venv/
 __pycache__/
 *.pyc
