@@ -10,7 +10,7 @@
 // --- MATRIX DIMENSIONS ---
 #define PANEL_WIDTH      64
 #define PANEL_HEIGHT     64
-#define PANEL_CHAIN      1
+#define PANEL_CHAIN      2  // Changed from 1 to 2!
 
 // --- GPIO PIN DEFINITIONS (Seengreat S3 Controller) ---
 #define R1_PIN   5
@@ -150,7 +150,7 @@ void drawListView() {
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
   dma_display->setCursor(2, 0);
   dma_display->print("NBA SCORES");
-  dma_display->drawFastHLine(1, 8, 64, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(1, 8, 127, dma_display->color565(60, 60, 60));
 
   // Games Rows (TomThumb Compact Font)
   dma_display->setFont(&TomThumb);
@@ -166,7 +166,7 @@ void drawListView() {
 
     // Highlight bar behind selected row
     if (isSelected) {
-      dma_display->fillRect(1, baselineY - 6, 64, 7, dma_display->color565(40, 40, 90));
+      dma_display->fillRect(1, baselineY - 6, 127, 7, dma_display->color565(40, 40, 90));
     }
 
     GameData g = gameList[i];
@@ -204,7 +204,7 @@ void drawBoxScoreView() {
   dma_display->setTextColor(dma_display->color565(0, 255, 255)); // Cyan for detail view
   dma_display->setCursor(2, 0);
   dma_display->print("BOX SCORE");
-  dma_display->drawFastHLine(1, 8, 64, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(1, 8, 127, dma_display->color565(60, 60, 60));
 
   // Details (TomThumb Font)
   dma_display->setFont(&TomThumb);
