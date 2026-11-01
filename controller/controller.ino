@@ -5,6 +5,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <Fonts/TomThumb.h>
 #include <string>
+#include <time.h>
 
 #include "config.h"
 #include "logos.h"
@@ -78,6 +79,27 @@ void setupWifi() {
     Serial.print(".");
   }
   Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
+}
+
+void setupNTP() {
+    // configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2)
+    // -18000 = -5 hours (Eastern Standard Time), 3600 = 1 hour DST offset
+    configTime(-18000, 3600, "pool.ntp.org", "time.nist.gov");
+}
+
+String getCurrentDate() {
+    struct tm timeinfo;
+    
+    // Check if time is successfully synchronized
+    if (!getLocalTime(&timeinfo)) {
+        return "Syncing...";
+    }
+    
+    char buffer[11]; // Space for "MM/DD/YYYY" plus null terminator
+    // %m = month (01-12), %d = day (01-31)
+    strftime(buffer, sizeof(buffer), "%m/%d", &timeinfo);
+    
+    return String(buffer);
 }
 
 void fetchBoxScoreDetails(String gameId) {
@@ -162,12 +184,20 @@ void fetchState() {
 }
 
 void drawListView() {
+  // Get current date
+  String todayDate = getCurrentDate();
+  // Serial.println(todayDate);
+
   // Top Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(dma_display->color565(255, 165, 0));
   dma_display->setCursor(35, 0);
   dma_display->print("NBA SCORES");
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextColor(dma_display->color565(60, 60, 60));
+  dma_display->setCursor(100, 7);
+  dma_display->print(todayDate);
   dma_display->drawFastHLine(33, 8, 63, dma_display->color565(60, 60, 60));
 
   int currentPage = selectedIndex / GAMES_PER_PAGE;
@@ -190,7 +220,7 @@ void drawListView() {
     // 1. Away Tricode (Regular Font - top-left aligned)
     dma_display->setFont();
     dma_display->setTextSize(1);
-    dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
+    dma_display->setTextColor(hexToRGB565(g.awayColor));
     dma_display->setCursor(2, baselineY - 7);
     dma_display->print(g.awayTricode);
 
@@ -199,30 +229,30 @@ void drawListView() {
 
     // 2. Away Score (TomThumb)
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(20, baselineY - 1);
+    dma_display->setCursor(26, baselineY - 1);
     dma_display->print(g.awayScore);
 
     // 3. Hyphen (TomThumb)
     dma_display->setTextColor(dma_display->color565(120, 120, 120));
-    dma_display->setCursor(30, baselineY - 1);
+    dma_display->setCursor(36, baselineY - 1);
     dma_display->print("-");
 
     // 4. Home Score (TomThumb)
     dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 0) : dma_display->color565(200, 200, 0));
-    dma_display->setCursor(35, baselineY - 1);
+    dma_display->setCursor(41, baselineY - 1);
     dma_display->print(g.homeScore);
 
     // 5. Home Tricode (Regular Font - top-left aligned)
     dma_display->setFont();
     dma_display->setTextSize(1);
-    dma_display->setTextColor(isSelected ? dma_display->color565(255, 255, 255) : dma_display->color565(200, 200, 200));
-    dma_display->setCursor(46, baselineY - 7);
+    dma_display->setTextColor(hexToRGB565(g.homeColor));
+    dma_display->setCursor(52, baselineY - 7);
     dma_display->print(g.homeTricode);
 
     // 6. Status (TomThumb)
     dma_display->setFont(&TomThumb);
     dma_display->setTextColor(isSelected ? dma_display->color565(0, 0, 255) : dma_display->color565(0, 0, 200));
-    dma_display->setCursor(68, baselineY - 1);
+    dma_display->setCursor(78, baselineY - 1);
     dma_display->print(g.status);
   }
 }
@@ -231,6 +261,9 @@ void drawBoxScoreView() {
   if (totalGames == 0 || selectedIndex >= totalGames) return;
   GameData g = gameList[selectedIndex];
 
+  // Setup away abbr. offset
+  int awayXOffset = 2;
+
   // Logos
   // 1. Try to get the logo pointers
   const uint16_t* awayLogo = getTeamLogo(g.awayTricode);
@@ -238,27 +271,45 @@ void drawBoxScoreView() {
 
   if (awayLogo != nullptr) {
     // Draw the 8x8 bitmap if the logo exists in your header
-    dma_display->drawRGBBitmap(2, 1, awayLogo, 16, 16);
+    dma_display->drawRGBBitmap(2, 2, awayLogo, 16, 16);
+
+    // Update awayXOffset
+    awayXOffset = 20;
   }
+
+  int16_t x1, y1;
+  uint16_t w, h;
+  dma_display->getTextBounds(g.awayTricode, awayXOffset, 0, &x1, &y1, &w, &h);
 
   // Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(hexToRGB565(g.awayColor));
-  dma_display->setCursor(20, 0);
+  dma_display->setCursor(awayXOffset, 0);
   dma_display->print(g.awayTricode);
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(38, 0);
-  dma_display->print(" vs ");
-  dma_display->setTextColor(hexToRGB565(g.homeColor));
-  dma_display->setCursor(63, 0);
-  dma_display->print(g.homeTricode);
-  dma_display->drawFastHLine(19, 8, 62, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(awayXOffset - 1, 8, w + 2, dma_display->color565(60, 60, 60));
 
+  dma_display->setCursor(54, 0);
+  dma_display->print(w);
+
+  // Get width of g.homeTricode
+  dma_display->getTextBounds(g.homeTricode, 0, 0, &x1, &y1, &w, &h);
+
+  int homeXOffset = 127 - w;
   if (homeLogo != nullptr) {
     // Draw the 8x8 bitmap if the logo exists in your header
-    dma_display->drawRGBBitmap(82, 1, homeLogo, 16, 16);
+    dma_display->drawRGBBitmap(111, 1, homeLogo, 16, 16);
+
+    homeXOffset = homeXOffset - 17;
   }
+
+  dma_display->setTextColor(hexToRGB565(g.homeColor));
+  dma_display->setCursor(homeXOffset, 0);
+  dma_display->print(g.homeTricode);
+  dma_display->drawFastHLine(homeXOffset - 1, 8, w + 1, dma_display->color565(60, 60, 60));
+
+  dma_display->setCursor(100, 0);
+  dma_display->print(w);
 
   // Details (TomThumb Font)
   dma_display->setFont(&TomThumb);
@@ -268,24 +319,31 @@ void drawBoxScoreView() {
   dma_display->print("Score: " + g.awayScore + " - " + g.homeScore);
 
   dma_display->setTextColor(dma_display->color565(0, 150, 0));
-  dma_display->setCursor(2, 36);
+  dma_display->setCursor(2, 40);
   dma_display->print("Status: " + (boxScoreDetail.length() > 0 ? boxScoreDetail : g.status));
 }
 
 // Helper function to trim trailing "Quarter"
 String cleanGameStatus(std::string status) {
-    // Find the last occurrence of "Quarter"
-    size_t pos = status.rfind("Quarter");
-    
-    // If found, ensure it's near the end of the string to avoid cutting off mid-word
-    if (pos != std::string::npos) {
-        // Erase "Quarter" and any trailing/leading spaces left behind
-        status.erase(pos);
+    // For before a game: Find the occurance of "at"
+    size_t atPos = status.rfind("at");
+
+    // For during game: Find the last occurrence of "Quarter"
+    size_t qtrPos = status.rfind("Quarter");
+
+    if (atPos != std::string::npos) { // Cut off start of datetime status
+      // Erase text up to and including "at"
+      // plus any trailing/leading spaces left behind
+      status.erase(0, atPos + 2);
+    }
+    else if (qtrPos != std::string::npos) { // Cut off "Quarter"
+      // Erase "Quarter" and any trailing/leading spaces left behind
+      status.erase(qtrPos);
         
-        // Optional: Trim any trailing whitespace left after removal
-        while (!status.empty() && isspace(status.back())) {
-            status.pop_back();
-        }
+      // Optional: Trim any trailing whitespace left after removal
+      while (!status.empty() && isspace(status.back())) {
+        status.pop_back();
+      }
     }
     
     return status.c_str();
@@ -342,6 +400,8 @@ void setup() {
   dma_display->print("Connecting...");
 
   setupWifi();
+
+  setupNTP();
 }
 
 void loop() {
