@@ -295,7 +295,11 @@ void drawBoxScoreView() {
   // Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
-  dma_display->setTextColor(hexToRGB565(g.awayColor));
+  if (g.awayColor == "000000" || g.awayColor == "#000000") {
+    dma_display->setTextColor(hexToRGB565(g.awayAltColor));
+  } else {
+    dma_display->setTextColor(hexToRGB565(g.awayColor));
+  }
   dma_display->setCursor(awayXOffset, 1);
   dma_display->print(g.awayTricode);
 
@@ -320,7 +324,11 @@ void drawBoxScoreView() {
 
   dma_display->setFont();
   dma_display->setTextSize(1);
-  dma_display->setTextColor(hexToRGB565(g.homeColor));
+  if (g.homeColor == "000000" || g.homeColor == "#000000") {
+    dma_display->setTextColor(hexToRGB565(g.homeAltColor));
+  } else {
+    dma_display->setTextColor(hexToRGB565(g.homeColor));
+  }
   dma_display->setCursor(homeXOffset, 1);
   dma_display->print(g.homeTricode);
   dma_display->drawFastHLine(homeXOffset - 1, 9, homeWidth + 1, dma_display->color565(60, 60, 60));
