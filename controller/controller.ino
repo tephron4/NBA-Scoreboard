@@ -121,6 +121,8 @@ void fetchBoxScoreDetails(String gameId) {
       std::string rawStatus = doc["status"]["detail"];
       boxScoreDetail = cleanGameStatus(rawStatus);
       lastFetchedBoxScoreId = gameId;
+    } else {
+      Serial.println("Error deserializingJson(doc, payload)");
     }
   }
   http.end();
@@ -163,6 +165,7 @@ void fetchState() {
         gameList[totalGames].homeLineScores = game["home_team"]["lineScores"].as<String>();
         std::string rawStatus = game["status"];
         gameList[totalGames].status       = cleanGameStatus(rawStatus);
+        // Serial.println(gameList[totalGames].status);
         totalGames++;
       }
       statusMessage = "";
@@ -277,25 +280,25 @@ void drawBoxScoreView() {
     awayXOffset = 20;
   }
 
-  int16_t x1, y1;
-  uint16_t w, h;
-  dma_display->getTextBounds(g.awayTricode, awayXOffset, 0, &x1, &y1, &w, &h);
-
   // Header (Standard Font)
   dma_display->setFont();
   dma_display->setTextSize(1);
   dma_display->setTextColor(hexToRGB565(g.awayColor));
-  dma_display->setCursor(awayXOffset, 0);
+  dma_display->setCursor(awayXOffset, 1);
   dma_display->print(g.awayTricode);
-  dma_display->drawFastHLine(awayXOffset - 1, 8, w + 2, dma_display->color565(60, 60, 60));
 
-  dma_display->setCursor(54, 0);
-  dma_display->print(w);
+  int16_t x1, y1;
+
+  // Get width of g.awayTricode
+  uint16_t awayWidth, awayHeight;
+  dma_display->getTextBounds(g.awayTricode, 0, 0, &x1, &y1, &awayWidth, &awayHeight);
+  dma_display->drawFastHLine(awayXOffset - 1, 9, awayWidth + 1, dma_display->color565(60, 60, 60));
 
   // Get width of g.homeTricode
-  dma_display->getTextBounds(g.homeTricode, 0, 0, &x1, &y1, &w, &h);
+  uint16_t homeWidth, homeHeight;
+  dma_display->getTextBounds(g.homeTricode, 0, 0, &x1, &y1, &homeWidth, &homeHeight);
 
-  int homeXOffset = 127 - w;
+  int homeXOffset = 127 - homeWidth;
   if (homeLogo != nullptr) {
     // Draw the 8x8 bitmap if the logo exists in your header
     dma_display->drawRGBBitmap(111, 1, homeLogo, 16, 16);
@@ -303,24 +306,75 @@ void drawBoxScoreView() {
     homeXOffset = homeXOffset - 17;
   }
 
+  dma_display->setFont();
+  dma_display->setTextSize(1);
   dma_display->setTextColor(hexToRGB565(g.homeColor));
-  dma_display->setCursor(homeXOffset, 0);
+  dma_display->setCursor(homeXOffset, 1);
   dma_display->print(g.homeTricode);
-  dma_display->drawFastHLine(homeXOffset - 1, 8, w + 1, dma_display->color565(60, 60, 60));
+  dma_display->drawFastHLine(homeXOffset - 1, 9, homeWidth + 1, dma_display->color565(60, 60, 60));
 
-  dma_display->setCursor(100, 0);
-  dma_display->print(w);
+  // dma_display->setCursor(70, 0);
+  // dma_display->print(w);
 
-  // Details (TomThumb Font)
-  dma_display->setFont(&TomThumb);
+  // Serial.println("Checking pregame");
+  // Draw status & score
+  if (pregame(g.status)) { // Check if it's still pregame
+    // Serial.println("Pregame");
+    // Show game start time between team abbreviations
+    dma_display->setTextColor(dma_display->color565(0, 75, 0));
 
-  dma_display->setTextColor(dma_display->color565(255, 255, 0));
-  dma_display->setCursor(2, 24);
-  dma_display->print("Score: " + g.awayScore + " - " + g.homeScore);
+    // Get the width of the start time text
+    uint16_t w, h;
+    dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h);
 
-  dma_display->setTextColor(dma_display->color565(0, 150, 0));
-  dma_display->setCursor(2, 40);
-  dma_display->print("Status: " + (boxScoreDetail.length() > 0 ? boxScoreDetail : g.status));
+    dma_display->setFont(&TomThumb);
+    dma_display->setCursor(64 - (w / 2), 0);
+    dma_display->print(g.status);
+  } else {
+    // Serial.println("NOT Pregame");
+    // Show the score between the team abbreviations
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(2);
+    dma_display->setTextColor(dma_display->color565(255, 255, 0));
+    dma_display->setCursor(awayXOffset + awayWidth + 2, 12);
+    dma_display->print(g.awayScore);
+
+    uint16_t w, h;
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(2);
+    dma_display->getTextBounds(g.homeScore, 0, 0, &x1, &y1, &w, &h); // Get Home score width
+    dma_display->setTextColor(dma_display->color565(255, 255, 0));
+    dma_display->setCursor(homeXOffset - w - 3, 12);
+    dma_display->print(g.homeScore);
+
+    // Show the game clock below the score
+    dma_display->setTextSize(1);
+    dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h); // Get the width of the game clock text
+    dma_display->setTextColor(dma_display->color565(0, 75, 0));
+    dma_display->setCursor(64 - (w / 2), 19);
+    dma_display->print(g.status);
+  }
+}
+
+bool pregame(String status) {
+  int hour, minute;
+  char ampm[3];
+  char timezone[10];
+
+  // sscanf looks for: digit(s), colon, two digits, space, AM/PM, space, timezone
+  // %d reads the hour
+  // %2d reads exactly 2 digits for the minute
+  // %2s reads AM or PM
+  // %s reads the timezone string
+  int matched = sscanf(status.c_str(), "%d:%2d %2s %s", &hour, &minute, ampm, timezone);
+
+  // We expect exactly 4 successful conversions
+  if (matched != 4) {
+    return false;
+  }
+
+  Serial.println("pregame");
+  return true;
 }
 
 // Helper function to trim trailing "Quarter"
