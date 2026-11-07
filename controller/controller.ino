@@ -63,13 +63,17 @@ struct PlayerData {
   String reason;
   bool ejected;
   String stats[14];
-}
+};
 
 struct BoxScoreData {
   String teamTricode;
   PlayerData playerData[18];
   uint8_t playerCount = 0;
-}
+};
+
+// Cache for home and away boxscores
+BoxScoreData awayBoxScore;
+BoxScoreData homeBoxScore;
 
 const int MAX_GAMES = 20;
 GameData gameList[MAX_GAMES];
@@ -85,7 +89,9 @@ String boxScoreDetail = "";
 String lastFetchedBoxScoreId = "";
 
 unsigned long lastFetchTime = 0;
+unsigned long lastBoxScoreFetchTime = 0;
 const unsigned long FETCH_INTERVAL = 3000; // Poll every 3s for snappy web dashboard sync
+const unsigned long FETCH_BOX_SCORE_INTERVAL = 5000;
 String statusMessage = "Connecting...";
 
 void setupWifi() {
@@ -124,25 +130,88 @@ String getCurrentDate() {
 void fetchBoxScoreDetails(String gameId) {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  // Uses PI_BASE_URL defined in config.h
   String url = String(PI_BASE_URL) + "/game/" + gameId + "/boxscore";
+  // Serial.println("Fetching boxscore from: " + url);
 
   HTTPClient http;
   http.begin(url);
   int httpCode = http.GET();
 
+  // Serial.println("HTTP Response Code: " + String(httpCode)); // Check if it's 200 OK
+
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
+    
+    // Print a snippet of the payload to verify the JSON structure
+    // Serial.println("Payload length: " + String(payload.length()));
+    if (payload.length() > 200) {
+      // Serial.println("Payload preview: " + payload.substring(0, 200));
+    } else {
+      // Serial.println("Payload: " + payload);
+    }
+
     DynamicJsonDocument doc(16384);
     DeserializationError error = deserializeJson(doc, payload);
 
     if (!error) {
-      std::string rawStatus = doc["status"]["detail"];
-      boxScoreDetail = cleanGameStatus(rawStatus);
+      if (doc["status"]["detail"].is<const char*>()) {
+        std::string rawStatus = doc["status"]["detail"];
+        boxScoreDetail = cleanGameStatus(rawStatus);
+      }
       lastFetchedBoxScoreId = gameId;
+
+      auto parseTeamPlayers = [](JsonObject teamObj, BoxScoreData &boxScore) {
+        boxScore.teamTricode = teamObj["abbreviation"].as<String>();
+        boxScore.playerCount = 0;
+
+        JsonArray activeArr = teamObj["activePlayers"];
+        for (JsonObject athlete : activeArr) {
+          if (boxScore.playerCount >= 18) break;
+          PlayerData &p = boxScore.playerData[boxScore.playerCount];
+          
+          p.name = athlete["name"].as<String>();
+          p.shortName = athlete["shortName"].as<String>();
+          p.jerseyNumber = athlete["jerseyNumber"].as<String>();
+          p.position = athlete["position"].as<String>();
+          p.starter = athlete["starter"] | false;
+          p.active = true;
+          p.didNotPlay = athlete["didNotPlay"] | false;
+          p.reason = athlete["reason"].as<String>();
+          p.ejected = athlete["ejected"] | false;
+
+          JsonArray statsArr = athlete["stats"];
+          int statIdx = 0;
+          for (JsonVariant statVal : statsArr) {
+            if (statIdx < 14) {
+              p.stats[statIdx] = statVal.as<String>();
+            }
+            statIdx++;
+          }
+          boxScore.playerCount++;
+        }
+      };
+
+      JsonObject teamsObj = doc["teams"];
+
+      if (teamsObj["away"].is<JsonObject>()) {
+        parseTeamPlayers(teamsObj["away"], awayBoxScore);
+        // Serial.println("Away players parsed successfully: " + String(awayBoxScore.playerCount));
+      } else {
+        // Serial.println("Warning: 'teams.away' object missing or invalid in JSON");
+      }
+
+      if (teamsObj["home"].is<JsonObject>()) {
+        parseTeamPlayers(teamsObj["home"], homeBoxScore);
+        // Serial.println("Home players parsed successfully: " + String(homeBoxScore.playerCount));
+      } else {
+        // Serial.println("Warning: 'teams.home' object missing or invalid in JSON");
+      }
+
     } else {
-      Serial.println("Error deserializingJson(doc, payload)");
+      Serial.println("Deserialization failed: " + String(error.c_str()));
     }
+  } else {
+    Serial.println("HTTP error: " + String(httpCode));
   }
   http.end();
 }
@@ -196,10 +265,12 @@ void fetchState() {
   }
   http.end();
 
-  // If in box score view, fetch deep stats if game ID changes
+  // If in box score view, fetch deep stats periodically
   if (currentView == "boxscore" && totalGames > 0 && selectedIndex < totalGames) {
-    String activeGameId = gameList[selectedIndex].gameId;
-    if (activeGameId != lastFetchedBoxScoreId) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastBoxScoreFetchTime >= FETCH_BOX_SCORE_INTERVAL || lastBoxScoreFetchTime == 0) {
+      lastFetchTime = currentMillis;
+      String activeGameId = gameList[selectedIndex].gameId;
       fetchBoxScoreDetails(activeGameId);
     }
   }
@@ -299,15 +370,11 @@ void drawBoxScoreView() {
   int awayXOffset = 2;
 
   // Logos
-  // 1. Try to get the logo pointers
   const uint16_t* awayLogo = getTeamLogo(g.awayTricode);
   const uint16_t* homeLogo = getTeamLogo(g.homeTricode);
 
   if (awayLogo != nullptr) {
-    // Draw the 8x8 bitmap if the logo exists in your header
     dma_display->drawRGBBitmap(2, 2, awayLogo, 16, 16);
-
-    // Update awayXOffset
     awayXOffset = 20;
   }
 
@@ -335,9 +402,7 @@ void drawBoxScoreView() {
 
   int homeXOffset = 127 - homeWidth;
   if (homeLogo != nullptr) {
-    // Draw the 8x8 bitmap if the logo exists in your header
     dma_display->drawRGBBitmap(111, 1, homeLogo, 16, 16);
-
     homeXOffset = homeXOffset - 17;
   }
 
@@ -352,29 +417,17 @@ void drawBoxScoreView() {
   dma_display->print(g.homeTricode);
   dma_display->drawFastHLine(homeXOffset - 1, 9, homeWidth + 1, dma_display->color565(60, 60, 60));
 
-  // dma_display->setCursor(70, 0);
-  // dma_display->print(w);
-
-  // Serial.println("Checking pregame");
   // Draw status & score
-  if (pregame(g.status)) { // Check if it's still pregame
-    // Serial.println("Pregame");
-    // Serial.println(g.status);
-    // Show game start time between team abbreviations
+  if (pregame(g.status)) { 
     dma_display->setTextColor(dma_display->color565(0, 75, 0));
     dma_display->setFont(&TomThumb);
     dma_display->setTextSize(1);
 
-    // Get the width of the start time text
     uint16_t w, h;
     dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h);
-
     dma_display->setCursor(64 - (w / 2), 7);
     dma_display->print(g.status);
   } else {
-    // Serial.println("NOT Pregame");
-    // Serial.println(g.status);
-    // Show the score between the team abbreviations
     dma_display->setFont(&TomThumb);
     dma_display->setTextSize(2);
     dma_display->setTextColor(dma_display->color565(255, 255, 0));
@@ -384,17 +437,130 @@ void drawBoxScoreView() {
     uint16_t w, h;
     dma_display->setFont(&TomThumb);
     dma_display->setTextSize(2);
-    dma_display->getTextBounds(g.homeScore, 0, 0, &x1, &y1, &w, &h); // Get Home score width
+    dma_display->getTextBounds(g.homeScore, 0, 0, &x1, &y1, &w, &h);
     dma_display->setTextColor(dma_display->color565(255, 255, 0));
     dma_display->setCursor(homeXOffset - w - 3, 12);
     dma_display->print(g.homeScore);
 
     // Show the game clock below the score
     dma_display->setTextSize(1);
-    dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h); // Get the width of the game clock text
+    dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h);
     dma_display->setTextColor(dma_display->color565(0, 75, 0));
     dma_display->setCursor(64 - (w / 2), 19);
     dma_display->print(g.status);
+  }
+
+  // --- BOXSCORE HEADERS & ACTIVE PLAYERS ROSTER VIEW ---
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+
+  // 1. Draw Column Labels above the player rows (Y = 22)
+  // Assuming your server passes labels in homeBoxScore / awayBoxScore or you can grab them.
+  // For standard NBA boxscores, the common stat headers are: "MIN", "PTS", "REB", "AST" (or similar).
+  // We'll draw static or dynamic headers for the inside stats columns:
+  dma_display->setTextColor(dma_display->color565(120, 120, 120));
+  
+  // Away Side Headers (Left)
+  dma_display->setCursor(2, 26);   dma_display->print("#");
+  dma_display->setCursor(25, 26);  dma_display->print("PTS");
+  dma_display->setCursor(38, 26);  dma_display->print("REB");
+  dma_display->setCursor(51, 26);  dma_display->print("AST");
+
+  // Home Side Headers (Right)
+  dma_display->setCursor(67, 26);  dma_display->print("AST");
+  dma_display->setCursor(80, 26);  dma_display->print("REB");
+  dma_display->setCursor(93, 26);  dma_display->print("PTS");
+  dma_display->setCursor(120, 26); dma_display->print("#");
+
+  // Divider line under headers
+  dma_display->drawFastHLine(0, 27, 128, dma_display->color565(40, 40, 40));
+
+  int startY = 34;
+  int rowHeight = 7;
+
+  // 2. Draw Away Active Players (Left Side)
+  int renderedAwayCount = 0;
+  for (int i = 0; i < awayBoxScore.playerCount && renderedAwayCount < 5; i++) {
+    PlayerData &p = awayBoxScore.playerData[i];
+    
+    if (p.shortName.length() > 0) {
+      int yPos = startY + (renderedAwayCount * rowHeight);
+      
+      // Outside -> Inside sequence:
+      // A. Jersey Number (X = 2)
+      dma_display->setTextColor(dma_display->color565(150, 150, 150));
+      dma_display->setCursor(2, yPos);
+      dma_display->print(p.jerseyNumber);
+
+      // B. First 4 characters of last name (shortName format is "J. Doe" -> grab last name part)
+      String lastNameOnly = p.shortName;
+      int spaceIdx = p.shortName.indexOf(' ');
+      if (spaceIdx != -1) {
+        lastNameOnly = p.shortName.substring(spaceIdx + 1);
+      }
+      String nameSnippet = lastNameOnly.substring(0, min((unsigned int)3, (unsigned int)lastNameOnly.length()));
+      
+      dma_display->setTextColor(dma_display->color565(175, 175, 175));
+      dma_display->setCursor(12, yPos);
+      dma_display->print(nameSnippet);
+
+      // C. Stats: PTS, REB, AST (moving inward toward the center split)
+      String pts = (p.stats[0].length() > 0) ? p.stats[1] : "0";
+      String reb = (p.stats[1].length() > 0) ? p.stats[5] : "0";
+      String ast = (p.stats[2].length() > 0) ? p.stats[6] : "0";
+      // String pts = "00"; // for testing
+      // String reb = "00"; // for testing
+      // String ast = "00"; // for testing
+
+      dma_display->setTextColor(dma_display->color565(255, 255, 255));
+      dma_display->setCursor(27, yPos); dma_display->print(pts);
+      dma_display->setCursor(40, yPos); dma_display->print(reb);
+      dma_display->setCursor(53, yPos); dma_display->print(ast);
+
+      renderedAwayCount++;
+    }
+  }
+
+  // 3. Draw Home Active Players (Right Side)
+  int renderedHomeCount = 0;
+  for (int i = 0; i < homeBoxScore.playerCount && renderedHomeCount < 5; i++) {
+    PlayerData &p = homeBoxScore.playerData[i];
+    
+    if (p.shortName.length() > 0) {
+      int yPos = startY + (renderedHomeCount * rowHeight);
+      
+      // Inside -> Outside sequence for Home (from center split outward to the right edge):
+      String pts = (p.stats[0].length() > 0) ? p.stats[1] : "0";
+      String reb = (p.stats[1].length() > 0) ? p.stats[5] : "0";
+      String ast = (p.stats[2].length() > 0) ? p.stats[6] : "0";
+      // String pts = "00"; // for testing
+      // String reb = "00"; // for testing
+      // String ast = "00"; // for testing
+
+      dma_display->setTextColor(dma_display->color565(175, 175, 175));
+      dma_display->setCursor(69, yPos); dma_display->print(ast);
+      dma_display->setCursor(82, yPos); dma_display->print(reb);
+      dma_display->setCursor(95, yPos); dma_display->print(pts);
+
+      // Last name snippet (first 4 chars)
+      String lastNameOnly = p.shortName;
+      int spaceIdx = p.shortName.indexOf(' ');
+      if (spaceIdx != -1) {
+        lastNameOnly = p.shortName.substring(spaceIdx + 1);
+      }
+      String nameSnippet = lastNameOnly.substring(0, min((unsigned int)3, (unsigned int)lastNameOnly.length()));
+
+      dma_display->setTextColor(dma_display->color565(200, 200, 200));
+      dma_display->setCursor(106, yPos);
+      dma_display->print(nameSnippet);
+
+      // Jersey Number (Right edge near X = 125)
+      dma_display->setTextColor(dma_display->color565(150, 150, 150));
+      dma_display->setCursor(120, yPos);
+      dma_display->print(p.jerseyNumber);
+
+      renderedHomeCount++;
+    }
   }
 }
 
