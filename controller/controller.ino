@@ -52,6 +52,25 @@ struct GameData {
   String status;
 };
 
+struct PlayerData {
+  String name;
+  String shortName;
+  String jerseyNumber;
+  String position;
+  bool starter;
+  bool active;
+  bool didNotPlay;
+  String reason;
+  bool ejected;
+  String stats[14];
+}
+
+struct BoxScoreData {
+  String teamTricode;
+  PlayerData playerData[18];
+  uint8_t playerCount = 0;
+}
+
 const int MAX_GAMES = 20;
 GameData gameList[MAX_GAMES];
 int totalGames = 0;
@@ -340,18 +359,21 @@ void drawBoxScoreView() {
   // Draw status & score
   if (pregame(g.status)) { // Check if it's still pregame
     // Serial.println("Pregame");
+    // Serial.println(g.status);
     // Show game start time between team abbreviations
     dma_display->setTextColor(dma_display->color565(0, 75, 0));
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
 
     // Get the width of the start time text
     uint16_t w, h;
     dma_display->getTextBounds(g.status, 0, 0, &x1, &y1, &w, &h);
 
-    dma_display->setFont(&TomThumb);
-    dma_display->setCursor(64 - (w / 2), 0);
+    dma_display->setCursor(64 - (w / 2), 7);
     dma_display->print(g.status);
   } else {
     // Serial.println("NOT Pregame");
+    // Serial.println(g.status);
     // Show the score between the team abbreviations
     dma_display->setFont(&TomThumb);
     dma_display->setTextSize(2);
@@ -381,11 +403,7 @@ bool pregame(String status) {
   char ampm[3];
   char timezone[10];
 
-  // sscanf looks for: digit(s), colon, two digits, space, AM/PM, space, timezone
-  // %d reads the hour
-  // %2d reads exactly 2 digits for the minute
-  // %2s reads AM or PM
-  // %s reads the timezone string
+  // sscanf parses the 4 components
   int matched = sscanf(status.c_str(), "%d:%2d %2s %s", &hour, &minute, ampm, timezone);
 
   // We expect exactly 4 successful conversions
@@ -393,7 +411,16 @@ bool pregame(String status) {
     return false;
   }
 
-  Serial.println("pregame");
+  // Validate logical ranges for time
+  if (hour < 1 || hour > 12) return false;
+  if (minute < 0 || minute > 59) return false;
+
+  // STRICT CHECK: Ensure ampm is actually AM or PM (blocks "-", "1st", etc.)
+  if (!(strcmp(ampm, "AM") == 0 || strcmp(ampm, "PM") == 0 || 
+        strcmp(ampm, "am") == 0 || strcmp(ampm, "pm") == 0)) {
+    return false;
+  }
+
   return true;
 }
 

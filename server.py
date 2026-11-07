@@ -199,10 +199,12 @@ def get_game_boxscore(game_id):
         
         # Build quarter/line scores mapping
         quarter_totals = {}
+        records = {}
         for comp in competitors:
             tricode = comp.get("team", {}).get("abbreviation")
             linescores = comp.get("linescores", [])
             quarter_totals[tricode] = [ls.get("displayValue") for ls in linescores]
+            records[tricode] = comp.get("record", [{}])[0].get("displayValue", "")
 
         teams_payload = {}
         espn_teams = boxscore_data.get("teams", [])
@@ -233,7 +235,13 @@ def get_game_boxscore(game_id):
                             player_data = {
                                 "id": athlete_info.get("id"),
                                 "name": athlete_info.get("displayName"),
+                                "shortName": athlete_info.get("shortName"),
+                                "jerseyNumber": athlete_info.get("jersey", ""),
                                 "position": athlete_info.get("position", {}).get("abbreviation"),
+                                "starter": athlete_entry.get("starter", False),
+                                "didNotPlay": athlete_entry.get("didNotPlay", False),
+                                "reason": athlete_entry.get("reason", ""),
+                                "ejected": athlete_entry.get("ejected", False),
                                 "stats": athlete_entry.get("stats", [])
                             }
                             
@@ -257,7 +265,8 @@ def get_game_boxscore(game_id):
             "game_id": game_id,
             "status": game_status,
             "teams": teams_payload,
-            "quarterTotals": quarter_totals
+            "quarterTotals": quarter_totals,
+            "records": records
         }
         
         return jsonify(formatted_payload), 200
