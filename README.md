@@ -1,121 +1,123 @@
-# ESP32-S3 Dual-Panel NBA Scoreboard & Boxscore Display
+# NBA Dual 64x64 LED Matrix Scoreboard & Boxscore Display
 
-An IoT-driven, real-time NBA scoreboard and interactive boxscore display built for dual chained 64x64 HUB75 LED matrices powered by an ESP32-S3. The system features dynamic team logos, color-matched themes, NTP time synchronization, and a split-screen active player boxscore viewer.
+A high-performance, real-time NBA scoreboard and split-screen active player boxscore display powered by an **ESP32-S3**, dual chained **64x64 HUB75 RGB LED Matrices**, and a **Raspberry Pi** backend server.
 
----
-
-## 🚀 Features
-
-* **Dual-Panel Rendering:** Drives dual 64x64 HUB75 LED matrices (128x64 total canvas) for high-density sports telemetry.
-* **Dynamic Game States:** Automatically switches between pregame start times, live quarter clocks/scores, and final summaries.
-* **Team Branding:** Parses team colors, alternate colors, and renders pre-compiled 16x16 transparent RGB565 team logos.
-* **Split-Screen Boxscore View:** Displays active player rosters side-by-side with column headers (`#`, `PLAYER`, `PTS`, `REB`, `AST`), showing jersey numbers, last name snippets, and live stat lines.
-* **Flask Backend Integration:** A lightweight Python server that fetches, processes, and structures data cleanly for low-memory microcontrollers.
+To avoid heavy JSON overhead and memory fragmentation on the microcontroller, this project uses a split-tier architecture: the Raspberry Pi polls live NBA data, flattens team payloads, and handles offline logo conversion, while the ESP32-S3 acts as a high-frequency display driver using DMA.
 
 ---
 
-## 🛠️ Hardware Components
-
-* **Microcontroller:** ESP32-S3 development board.
-* **Display:** Dual WatangTech 64x64 RGB LED Matrix Panels (HUB75 interface).
-* **Power Supply & Cabling:** Powered independently via a Nekmit 47W Dual-Port USB-C wall block paired with 10ft Cable Matters 100W/5A cables.
-* **Server Host:** Raspberry Pi running the Python Flask backend.
-
----
-
-## 📁 Project Structure
+## 🏗️ System Architecture
 
 ```text
-nba-scoreboard/
-├── backend/
-│   ├── app.py              # Flask server and ESPN data parser
-│   ├── utils.py            # Pillow-based logo converter (PNG to RGB565)
-│   └── requirements.txt    # Python dependencies
-└── controller/
-    ├── scoreboard.ino      # Main Arduino/ESP32-S3 firmware
-    ├── config.h            # Wi-Fi and server endpoint configuration
-    └── logos.h             # Pre-compiled 16x16 RGB565 team logo arrays
+[ NBA / ESPN API Endpoints ]
+          │
+          ▼  (Python / Flask / Requests)
+[ Raspberry Pi Server ]  ──► (Parses game states, team colors, & nested boxscores)
+          │
+          ▼  (HTTP JSON over Local Wi-Fi)
+[ ESP32-S3 + Dual 64x64 Matrices ] (Renders 128x64 UI & 16x16 RGB565 logos via DMA)
 
 ```
 
 ---
 
-## 📦 Backend Setup & Maintenance (Raspberry Pi)
+## 🧰 Hardware Components
 
-### 1. Installation
+| Component | Description |
+| --- | --- |
+| **LED Matrices** | Dual chained 64x64 HUB75 RGB LED Matrix Panels (128x64 total canvas) |
+| **Microcontroller** | ESP32-S3 development board (with HUB75 adapter / audio controller board) |
+| **Power Supply** | Nekmit 47W Dual-Port USB-C wall block + dual 10ft 100W/5A USB-C cables (independent panel power) |
+| **Server** | Raspberry Pi (running Raspberry Pi OS / Linux) |
 
-Navigate to your backend directory and install the required Python dependencies (including Pillow for transparent logo conversion):
+---
+
+## 🚀 Getting Started From Scratch
+
+### Part 1: Raspberry Pi Server Setup
+
+1. **Clone or create your project directory on the Pi:**
 
 ```bash
-cd backend
+mkdir -p ~/nba-matrix-server
+cd ~/nba-matrix-server
+
+```
+
+2. **Create and activate a Python virtual environment** (to comply with PEP 668 externally managed environment rules):
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+
+```
+
+3. **Install dependencies:**
+
+```bash
 pip install -r requirements.txt
 
 ```
 
-### 2. Running the Server Manually
-
-To test or run the Flask application interactively (e.g., on an alternative port like `8080`):
+4. **Generate Team Logos (Optional / One-Time):**
+The logos should already be in `/controller/logos.h`, but, if needed, you can run the Pillow utility script to fetch team PNGs, composite transparency onto black, and output 16x16 RGB565 arrays with:
 
 ```bash
-python3 app.py
+python3 generate_logos.py
 
 ```
 
-### 3. Managing the Systemd Background Service
+5. **Configure Auto-Start (`systemd` Service):**
+Create a systemd service file to run the Flask backend automatically in the background on boot:
 
-If configured as a systemd service (`nba-server.service`) on your Raspberry Pi, use standard `systemctl` commands to control it:
-
-* **Check Service Status:**
 ```bash
-sudo systemctl status nba-server.service
+sudo nano /etc/systemd/system/nba-server.service
 
 ```
 
+Paste the following configuration (adjust usernames, paths, and port flags to match your environment):
 
-* **Start the Service:**
-```bash
-sudo systemctl start nba-server.service
+```ini
+[Unit]
+Description=NBA Matrix Flask Server
+After=network.target
+
+[Service]
+Type=idle
+User=pi
+WorkingDirectory=/home/pi/nba-matrix-server
+ExecStart=/home/pi/nba-matrix-server/venv/bin/python /home/pi/nba-matrix-server/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 
 ```
 
+Enable and start the service:
 
-* **Restart the Service** (run this after pulling code updates or changing ports):
 ```bash
-sudo systemctl restart nba-server.service
-
-```
-
-
-* **Enable Auto-Start on Boot:**
-```bash
+sudo chmod 644 /etc/systemd/system/nba-server.service
+sudo systemctl daemon-reload
 sudo systemctl enable nba-server.service
-
-```
-
-
-
-### 4. Viewing Logs
-
-To stream live server output or troubleshoot incoming HTTP requests from your ESP32:
-
-```bash
-sudo journalctl -u nba-server.service -f
-
-```
-
-To view the last 50 lines without opening a scrolling pager:
-
-```bash
-sudo journalctl -u nba-server.service -n 50 --no-pager
+sudo systemctl start nba-server.service
 
 ```
 
 ---
 
-## 🎛️ ESP32-S3 Controller Setup
+### Part 2: ESP32-S3 Controller Setup
 
-1. **Configure Wi-Fi & Base URL:**
-Open `config.h` in your Arduino IDE or PlatformIO workspace and update your network credentials and server endpoint:
+1. **Arduino IDE Libraries:**
+Make sure you have the ESP32 board definitions installed, along with the required matrix, graphics, and JSON libraries:
+
+* `ESP32-HUB75-MatrixPanel-I2S-DMA`
+* `Adafruit GFX Library`
+* `ArduinoJson`
+
+2. **Setup Connection Details:**
+Create a `config.h` file in the `/controller` folder (copying from `config.h.example` if applicable) and update it with your Wi-Fi credentials and your Raspberry Pi's local static IP address and port:
+
 ```cpp
 #define WIFI_SSID "your_wifi_ssid"
 #define WIFI_PASSWORD "your_wifi_password"
@@ -123,6 +125,46 @@ Open `config.h` in your Arduino IDE or PlatformIO workspace and update your netw
 
 ```
 
+3. **Upload & Run:**
+Connect your ESP32-S3 to your PC, verify your HUB75 pin mappings and panel chain length (`NUM_COLS = 2`, `64x64`), and flash the firmware. The ESP32 will sync time via NTP, fetch live scores and active player boxscores from your Pi, and render the split-screen interface on the 128x64 display.
 
-2. **Compile and Flash:**
-Ensure you have the `ESP32-HUB75-MatrixPanel-I2S-DMA`, `ArduinoJson`, and Adafruit GFX libraries installed, then flash the sketch to your ESP32-S3.
+---
+
+## 🛠️ Server Maintenance & Logs
+
+* **Restart the server** (after updating code or changing ports):
+```bash
+sudo systemctl restart nba-server.service
+
+```
+
+
+* **Check service status:**
+```bash
+sudo systemctl status nba-server.service
+
+```
+
+
+* **View recent logs:**
+```bash
+sudo journalctl -u nba-server.service -n 50 --no-pager
+
+```
+
+
+* **Stream live logs:**
+```bash
+sudo journalctl -u nba-server.service -f
+
+```
+
+
+
+---
+
+*This project is not affiliated with, endorsed by, or connected to the National Basketball Association (NBA) or ESPN. All team names, logos, and trademarks are the property of their respective owners.*
+
+```
+
+```
