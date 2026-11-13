@@ -5,8 +5,14 @@
 #define WIFI_SSID     "YOUR_WIFI_SSID"
 #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
+// --- RASPBERRY PI SERVER CONFIGURATION ---
 #define PI_SERVER_IP   "192.168.1.X"
 #define PI_SERVER_PORT "5000"
-#define PI_SERVER_URL  "http://" PI_SERVER_IP ":" PI_SERVER_PORT "/live-scores"
+
+// Base URL prefix for your Pi server
+#define PI_BASE_URL    "http://" PI_SERVER_IP ":" PI_SERVER_PORT
+
+// Full endpoint for live scores
+#define PI_SERVER_URL  PI_BASE_URL "/live-scores"
 
 #endif // CONFIG_H
